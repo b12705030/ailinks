@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.api import links, reports
+from app.api import links, reports, chat
 from app.services.scheduler import setup_scheduler
 
 app = FastAPI(
@@ -22,6 +22,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(links.router)
 app.include_router(reports.router)
+app.include_router(chat.router)
 
 
 @app.get("/")
