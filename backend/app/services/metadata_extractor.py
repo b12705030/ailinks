@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from typing import Optional, Dict
 import re
+import json
 
 
 class MetadataExtractor:
@@ -30,10 +31,44 @@ class MetadataExtractor:
                 
                 # 提取 title
                 title = None
-                if soup.find('meta', property='og:title'):
-                    title = soup.find('meta', property='og:title').get('content')
-                elif soup.find('title'):
-                    title = soup.find('title').get_text().strip()
+                
+                # 特殊處理 YouTube
+                if 'youtube.com' in domain or 'youtu.be' in domain:
+                    # 嘗試從 JSON-LD 提取
+                    json_ld = soup.find('script', type='application/ld+json')
+                    if json_ld:
+                        try:
+                            data = json.loads(json_ld.string)
+                            if isinstance(data, dict):
+                                if 'name' in data:
+                                    title = data['name']
+                                elif '@graph' in data:
+                                    for item in data['@graph']:
+                                        if item.get('@type') == 'VideoObject' and 'name' in item:
+                                            title = item['name']
+                                            break
+                        except:
+                            pass
+                    
+                    # 如果還是沒有，嘗試 og:title
+                    if not title and soup.find('meta', property='og:title'):
+                        title = soup.find('meta', property='og:title').get('content')
+                    
+                    # 如果還是沒有，嘗試 title 標籤
+                    if not title and soup.find('title'):
+                        title = soup.find('title').get_text().strip()
+                    
+                    # 清理 YouTube 標題（移除 " - YouTube" 等後綴）
+                    if title:
+                        title = re.sub(r'\s*-\s*YouTube\s*$', '', title, flags=re.IGNORECASE)
+                        title = re.sub(r'\s*-\s*YouTube\s*-\s*.*$', '', title, flags=re.IGNORECASE)
+                        title = title.strip()
+                else:
+                    # 一般網站的處理
+                    if soup.find('meta', property='og:title'):
+                        title = soup.find('meta', property='og:title').get('content')
+                    elif soup.find('title'):
+                        title = soup.find('title').get_text().strip()
                 
                 # 提取 description
                 description = None
