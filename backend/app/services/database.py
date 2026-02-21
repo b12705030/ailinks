@@ -37,11 +37,42 @@ class DatabaseService:
             query = query.eq('reviewed', reviewed)
         
         if search:
-            # 使用 PostgREST 的 or 語法進行模糊搜索
-            # 注意：這需要 Supabase 支持，如果不行可以改為客戶端過濾
-            search_pattern = f'%{search}%'
-            # 簡化：只搜索 title（如果需要更複雜的搜索，可以在客戶端過濾）
-            query = query.ilike('title', search_pattern)
+            # 多字段搜索：先獲取數據，然後在 Python 中過濾
+            # 這樣可以搜索 title, description, summary, domain, ai_category, ai_tags
+            search_lower = search.lower()
+            all_results = query.execute()
+            filtered_results = []
+            
+            for link in (all_results.data if all_results.data else []):
+                # 檢查多個字段
+                title = (link.get('title') or '').lower()
+                description = (link.get('description') or '').lower()
+                summary = (link.get('summary') or '')
+                summary = summary.lower() if summary else ''
+                domain = (link.get('domain') or '').lower()
+                category = (link.get('ai_category') or '').lower()
+                tags = link.get('ai_tags', [])
+                tags_str = ' '.join([str(t).lower() for t in tags if t]).lower()
+                
+                # 如果任何字段包含搜索關鍵詞
+                if (search_lower in title or 
+                    search_lower in description or 
+                    search_lower in summary or
+                    search_lower in domain or 
+                    search_lower in category or
+                    search_lower in tags_str):
+                    filtered_results.append(link)
+            
+            # 按創建時間排序並限制數量
+            filtered_results.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            result_data = filtered_results[:limit]
+            
+            # 創建一個模擬的結果對象
+            class MockResult:
+                def __init__(self, data):
+                    self.data = data
+            
+            return MockResult(result_data).data
         
         query = query.order('created_at', desc=True).limit(limit).offset(offset)
         
