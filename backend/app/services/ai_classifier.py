@@ -2,6 +2,7 @@ from openai import OpenAI
 from typing import Dict, List, Optional
 from app.config import settings
 import json
+import re
 
 
 class AIClassifier:
@@ -148,21 +149,47 @@ URL: {url}
         tags: List[str]
     ) -> str:
         """
-        生成簡短易識別的名稱（4-8個字）
-        例如："暖心小說"、"Python教學"、"美食料理"
+        生成簡短易識別的名稱（4-10個字）
+        優先保留專有名詞（品牌名、產品名等），例如："Nuphy鍵盤"、"Python教學"
         """
         try:
-            # 如果有 tags，優先使用 tags 組合
-            if tags and len(tags) > 0:
-                # 選擇最相關的1-2個標籤
-                relevant_tags = tags[:2]
-                combined = ''.join(relevant_tags)
-                if len(combined) <= 8:
-                    return combined
+            # 先提取專有名詞（品牌名、產品名等）
+            proper_nouns = self._extract_proper_nouns(title, description, domain, tags)
             
-            # 使用 LLM 生成簡短名稱
-            content = f"""
-請為以下連結生成一個簡短易識別的名稱（4-8個字），讓人一眼就能看出這是什麼內容：
+            # 如果有專有名詞，優先使用專有名詞 + 類型描述
+            if proper_nouns:
+                # 使用 LLM 生成包含專有名詞的簡短名稱
+                content = f"""
+請為以下連結生成一個簡短易識別的名稱（4-10個字），必須包含專有名詞：
+
+URL: {url}
+標題: {title or '無'}
+描述: {description or '無'}
+域名: {domain}
+分類: {category}
+標籤: {', '.join(tags) if tags else '無'}
+專有名詞（必須保留）: {', '.join(proper_nouns)}
+
+要求：
+1. 名稱要簡短（4-10個字）
+2. **必須包含專有名詞**（品牌名、產品名、網站名等），例如：Nuphy、Python、YouTube、Apple
+3. 格式：專有名詞 + 類型描述（例如："Nuphy鍵盤"、"Python教學"、"YouTube影片"）
+4. 如果有多個專有名詞，選擇最重要的1-2個
+5. 要能一眼看出這是什麼內容和品牌/產品
+6. 只返回名稱，不要其他文字
+
+範例：
+- "Nuphy Halo75 機械鍵盤開箱" → "Nuphy鍵盤"
+- "Python 程式設計教學網站" → "Python教學"
+- "YouTube 美食料理頻道" → "YouTube美食"
+- "Apple iPhone 15 評測" → "iPhone評測"
+- "Notion 使用教學" → "Notion教學"
+- "溫馨的愛情小說推薦"（無專有名詞）→ "暖心小說"
+"""
+            else:
+                # 沒有專有名詞時，使用一般描述
+                content = f"""
+請為以下連結生成一個簡短易識別的名稱（4-8個字）：
 
 URL: {url}
 標題: {title or '無'}
@@ -177,41 +204,127 @@ URL: {url}
 4. 只返回名稱，不要其他文字
 
 範例：
-- "YouTube 美食料理頻道" → "美食料理"
-- "Python 程式設計教學" → "Python教學"
 - "溫馨的愛情小說推薦" → "暖心小說"
 - "健身運動教學網站" → "健身教學"
+- "美食料理食譜分享" → "美食食譜"
 """
             
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "你是一個專業的內容命名助手。請根據連結內容生成簡短易識別的名稱。"},
+                    {"role": "system", "content": "你是一個專業的內容命名助手。請根據連結內容生成簡短易識別的名稱，優先保留專有名詞（品牌名、產品名、網站名等）。"},
                     {"role": "user", "content": content}
                 ],
                 temperature=0.5,
-                max_tokens=20
+                max_tokens=25
             )
             
             short_name = response.choices[0].message.content.strip()
             # 移除可能的引號或標點
             short_name = short_name.strip('"\'「」『』【】')
-            # 限制長度
-            if len(short_name) > 8:
-                short_name = short_name[:8]
+            # 限制長度（如果有專有名詞，允許更長）
+            max_length = 10 if proper_nouns else 8
+            if len(short_name) > max_length:
+                short_name = short_name[:max_length]
             
-            return short_name if len(short_name) >= 2 else self._fallback_short_name(title, domain, category)
+            return short_name if len(short_name) >= 2 else self._fallback_short_name(title, domain, category, proper_nouns)
             
         except Exception as e:
             print(f"Short name generation error: {e}")
-            return self._fallback_short_name(title, domain, category)
+            return self._fallback_short_name(title, domain, category, proper_nouns)
     
-    def _fallback_short_name(self, title: Optional[str], domain: str, category: str) -> str:
-        """後備方案：從標題或域名生成簡短名稱"""
+    def _extract_proper_nouns(
+        self, 
+        title: Optional[str], 
+        description: Optional[str], 
+        domain: str,
+        tags: List[str]
+    ) -> List[str]:
+        """
+        提取專有名詞（品牌名、產品名、網站名等）
+        返回去重後的專有名詞列表
+        """
+        proper_nouns = set()
+        
+        # 常見品牌和產品名（可以擴展）
+        known_brands = {
+            'nuphy', 'apple', 'samsung', 'google', 'microsoft', 'amazon', 
+            'youtube', 'netflix', 'spotify', 'notion', 'figma', 'adobe',
+            'python', 'javascript', 'react', 'vue', 'typescript', 'node',
+            'iphone', 'ipad', 'macbook', 'airpods', 'apple watch',
+            'shopee', 'momo', 'pchome', 'youtube', 'instagram', 'facebook',
+            'twitter', 'x', 'linkedin', 'github', 'gitlab'
+        }
+        
+        # 從標題提取
+        if title:
+            title_lower = title.lower()
+            for brand in known_brands:
+                if brand in title_lower:
+                    # 找到原始大小寫形式
+                    pattern = re.compile(re.escape(brand), re.IGNORECASE)
+                    matches = pattern.findall(title)
+                    if matches:
+                        proper_nouns.add(matches[0])
+            
+            # 提取大寫開頭的詞（可能是專有名詞）
+            words = re.findall(r'\b[A-Z][a-z]+\b', title)
+            for word in words:
+                if len(word) >= 2 and word.lower() not in ['the', 'and', 'for', 'with', 'from', 'this', 'that']:
+                    proper_nouns.add(word)
+        
+        # 從描述提取
+        if description:
+            desc_lower = description.lower()
+            for brand in known_brands:
+                if brand in desc_lower:
+                    pattern = re.compile(re.escape(brand), re.IGNORECASE)
+                    matches = pattern.findall(description)
+                    if matches:
+                        proper_nouns.add(matches[0])
+        
+        # 從標籤提取
+        for tag in tags:
+            tag_lower = tag.lower()
+            if tag_lower in known_brands:
+                proper_nouns.add(tag)
+            # 如果標籤是大寫開頭或全大寫，可能是專有名詞
+            if tag and (tag[0].isupper() or tag.isupper()):
+                proper_nouns.add(tag)
+        
+        # 從域名提取（移除常見後綴）
+        domain_clean = domain.replace('www.', '').replace('m.', '').split('.')[0]
+        if domain_clean and len(domain_clean) >= 2:
+            # 如果域名看起來像品牌名（不是通用詞）
+            generic_domains = {'com', 'org', 'net', 'edu', 'gov', 'blog', 'site', 'app', 'io'}
+            if domain_clean.lower() not in generic_domains:
+                proper_nouns.add(domain_clean.capitalize())
+        
+        return list(proper_nouns)[:3]  # 最多返回3個專有名詞
+    
+    def _fallback_short_name(
+        self, 
+        title: Optional[str], 
+        domain: str, 
+        category: str,
+        proper_nouns: Optional[List[str]] = None
+    ) -> str:
+        """後備方案：從標題或域名生成簡短名稱，優先保留專有名詞"""
+        # 如果有專有名詞，優先使用
+        if proper_nouns:
+            # 使用第一個專有名詞 + 分類
+            return f"{proper_nouns[0]}{category[:2]}" if category else proper_nouns[0][:8]
+        
         if title:
             # 移除常見的無意義詞
             clean_title = title.replace('【', '').replace('】', '').replace('《', '').replace('》', '')
             clean_title = clean_title.replace('「', '').replace('」', '').replace('(', '').replace(')', '')
+            
+            # 嘗試提取專有名詞（大寫開頭的詞）
+            proper_noun_matches = re.findall(r'\b[A-Z][a-z]+\b', clean_title)
+            if proper_noun_matches:
+                return proper_noun_matches[0][:8]
+            
             # 取前6個字
             if len(clean_title) >= 2:
                 return clean_title[:6]
@@ -219,7 +332,7 @@ URL: {url}
         # 使用域名
         clean_domain = domain.replace('www.', '').replace('m.', '').split('.')[0]
         if len(clean_domain) >= 2:
-            return clean_domain[:6]
+            return clean_domain[:8]
         
         # 最後使用分類
         return category[:4] if category else "連結"
