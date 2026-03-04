@@ -206,6 +206,7 @@ async def chat(request: ChatRequest):
                 "source_app": link.get("source_app"),
                 "ai_category": link.get("ai_category"),
                 "ai_tags": link.get("ai_tags", []),
+                "short_name": link.get("short_name"),
                 "reviewed": link.get("reviewed", False),
                 "created_at": link.get("created_at")
             } for link in links[:10]]  # 返回前10個連結
@@ -214,3 +215,4 @@ async def chat(request: ChatRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 對話錯誤: {str(e)}")
 
+ 

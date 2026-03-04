@@ -18,7 +18,7 @@ class AIClassifier:
     async def classify(self, url: str, title: Optional[str], description: Optional[str], domain: str) -> Dict:
         """
         對連結進行 AI 分類
-        返回: category, tags, summary, importance_score
+        返回: category, tags, summary, importance_score, short_name
         """
         # 第一層：規則分類（快速）
         rule_category = self._rule_based_classify(domain, url, title)
@@ -26,11 +26,22 @@ class AIClassifier:
         # 第二層：LLM 語義分類（精準）
         llm_result = await self._llm_classify(url, title, description, domain, rule_category)
         
+        # 第三層：生成簡短易識別的名稱
+        short_name = await self._generate_short_name(
+            url=url,
+            title=title,
+            description=description,
+            domain=domain,
+            category=llm_result.get('category', rule_category),
+            tags=llm_result.get('tags', [])
+        )
+        
         return {
             'ai_category': llm_result.get('category', rule_category),
             'ai_tags': llm_result.get('tags', []),
             'summary': llm_result.get('summary', ''),
-            'importance_score': llm_result.get('importance_score', 50)
+            'importance_score': llm_result.get('importance_score', 50),
+            'short_name': short_name
         }
     
     def _rule_based_classify(self, domain: str, url: str, title: Optional[str]) -> str:
@@ -126,6 +137,92 @@ URL: {url}
                 'summary': '',
                 'importance_score': 50
             }
+    
+    async def _generate_short_name(
+        self, 
+        url: str, 
+        title: Optional[str], 
+        description: Optional[str], 
+        domain: str,
+        category: str,
+        tags: List[str]
+    ) -> str:
+        """
+        生成簡短易識別的名稱（4-8個字）
+        例如："暖心小說"、"Python教學"、"美食料理"
+        """
+        try:
+            # 如果有 tags，優先使用 tags 組合
+            if tags and len(tags) > 0:
+                # 選擇最相關的1-2個標籤
+                relevant_tags = tags[:2]
+                combined = ''.join(relevant_tags)
+                if len(combined) <= 8:
+                    return combined
+            
+            # 使用 LLM 生成簡短名稱
+            content = f"""
+請為以下連結生成一個簡短易識別的名稱（4-8個字），讓人一眼就能看出這是什麼內容：
+
+URL: {url}
+標題: {title or '無'}
+描述: {description or '無'}
+分類: {category}
+標籤: {', '.join(tags) if tags else '無'}
+
+要求：
+1. 名稱要簡短（4-8個字）
+2. 要能一眼看出內容類型（例如：溫馨故事、小說、學習網站、教學影片等）
+3. 不要使用分類名稱（如"學習"、"娛樂"），要用更具體的描述
+4. 只返回名稱，不要其他文字
+
+範例：
+- "YouTube 美食料理頻道" → "美食料理"
+- "Python 程式設計教學" → "Python教學"
+- "溫馨的愛情小說推薦" → "暖心小說"
+- "健身運動教學網站" → "健身教學"
+"""
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "你是一個專業的內容命名助手。請根據連結內容生成簡短易識別的名稱。"},
+                    {"role": "user", "content": content}
+                ],
+                temperature=0.5,
+                max_tokens=20
+            )
+            
+            short_name = response.choices[0].message.content.strip()
+            # 移除可能的引號或標點
+            short_name = short_name.strip('"\'「」『』【】')
+            # 限制長度
+            if len(short_name) > 8:
+                short_name = short_name[:8]
+            
+            return short_name if len(short_name) >= 2 else self._fallback_short_name(title, domain, category)
+            
+        except Exception as e:
+            print(f"Short name generation error: {e}")
+            return self._fallback_short_name(title, domain, category)
+    
+    def _fallback_short_name(self, title: Optional[str], domain: str, category: str) -> str:
+        """後備方案：從標題或域名生成簡短名稱"""
+        if title:
+            # 移除常見的無意義詞
+            clean_title = title.replace('【', '').replace('】', '').replace('《', '').replace('》', '')
+            clean_title = clean_title.replace('「', '').replace('」', '').replace('(', '').replace(')', '')
+            # 取前6個字
+            if len(clean_title) >= 2:
+                return clean_title[:6]
+        
+        # 使用域名
+        clean_domain = domain.replace('www.', '').replace('m.', '').split('.')[0]
+        if len(clean_domain) >= 2:
+            return clean_domain[:6]
+        
+        # 最後使用分類
+        return category[:4] if category else "連結"
     
     async def generate_weekly_report(self, stats: Dict, top_links: List[Dict]) -> str:
         """生成週報的 AI 分析"""

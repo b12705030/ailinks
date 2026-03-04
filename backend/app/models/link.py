@@ -23,6 +23,7 @@ class LinkResponse(BaseModel):
     content_type: Optional[str]
     ai_category: Optional[str]
     ai_tags: List[str] = []
+    short_name: Optional[str] = None  # AI 生成的簡短易識別名稱
     importance_score: int = 0
     reviewed: bool = False
     created_at: datetime

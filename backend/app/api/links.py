@@ -39,6 +39,7 @@ async def create_link(link_data: LinkCreate):
             'ai_category': ai_result.get('ai_category'),
             'ai_tags': ai_result.get('ai_tags', []),
             'summary': ai_result.get('summary'),
+            'short_name': ai_result.get('short_name'),
             'importance_score': ai_result.get('importance_score', 50)
         }
         
