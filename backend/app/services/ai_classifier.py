@@ -27,11 +27,12 @@ class AIClassifier:
         # 第二層：LLM 語義分類（精準）
         llm_result = await self._llm_classify(url, title, description, domain, rule_category)
         
-        # 第三層：生成簡短易識別的名稱
+        # 第三層：生成簡短易識別的名稱（使用 AI 總結來生成更準確的名稱）
         short_name = await self._generate_short_name(
             url=url,
             title=title,
             description=description,
+            summary=llm_result.get('summary', ''),  # 使用 AI 總結
             domain=domain,
             category=llm_result.get('category', rule_category),
             tags=llm_result.get('tags', [])
@@ -144,17 +145,21 @@ URL: {url}
         url: str, 
         title: Optional[str], 
         description: Optional[str], 
-        domain: str,
-        category: str,
-        tags: List[str]
+        summary: str = '',  # AI 總結
+        domain: str = '',
+        category: str = '',
+        tags: List[str] = None
     ) -> str:
         """
         生成簡短易識別的名稱（4-10個字）
         優先保留專有名詞（品牌名、產品名等），例如："Nuphy鍵盤"、"Python教學"
+        使用 AI 總結來生成更準確的名稱
         """
+        if tags is None:
+            tags = []
         try:
             # 先提取專有名詞（品牌名、產品名等）
-            proper_nouns = self._extract_proper_nouns(title, description, domain, tags)
+            proper_nouns = self._extract_proper_nouns(title, description, domain, tags, summary)
             
             # 如果有專有名詞，優先使用專有名詞 + 類型描述
             if proper_nouns:
@@ -165,6 +170,7 @@ URL: {url}
 URL: {url}
 標題: {title or '無'}
 描述: {description or '無'}
+AI 總結: {summary or '無'}
 域名: {domain}
 分類: {category}
 標籤: {', '.join(tags) if tags else '無'}
@@ -194,6 +200,7 @@ URL: {url}
 URL: {url}
 標題: {title or '無'}
 描述: {description or '無'}
+AI 總結: {summary or '無'}
 分類: {category}
 標籤: {', '.join(tags) if tags else '無'}
 
@@ -227,23 +234,26 @@ URL: {url}
             if len(short_name) > max_length:
                 short_name = short_name[:max_length]
             
-            return short_name if len(short_name) >= 2 else self._fallback_short_name(title, domain, category, proper_nouns)
+            return short_name if len(short_name) >= 2 else self._fallback_short_name(title, summary, domain, category, proper_nouns)
             
         except Exception as e:
             print(f"Short name generation error: {e}")
-            return self._fallback_short_name(title, domain, category, proper_nouns)
+            return self._fallback_short_name(title, summary, domain, category, proper_nouns)
     
     def _extract_proper_nouns(
         self, 
         title: Optional[str], 
         description: Optional[str], 
-        domain: str,
-        tags: List[str]
+        domain: str = '',
+        tags: List[str] = None,
+        summary: str = ''
     ) -> List[str]:
         """
         提取專有名詞（品牌名、產品名、網站名等）
         返回去重後的專有名詞列表
         """
+        if tags is None:
+            tags = []
         proper_nouns = set()
         
         # 常見品牌和產品名（可以擴展）
@@ -283,6 +293,22 @@ URL: {url}
                     if matches:
                         proper_nouns.add(matches[0])
         
+        # 從 AI 總結提取專有名詞
+        if summary:
+            summary_lower = summary.lower()
+            for brand in known_brands:
+                if brand in summary_lower:
+                    pattern = re.compile(re.escape(brand), re.IGNORECASE)
+                    matches = pattern.findall(summary)
+                    if matches:
+                        proper_nouns.add(matches[0])
+            
+            # 提取大寫開頭的詞（可能是專有名詞）
+            words = re.findall(r'\b[A-Z][a-z]+\b', summary)
+            for word in words:
+                if len(word) >= 2 and word.lower() not in ['the', 'and', 'for', 'with', 'from', 'this', 'that']:
+                    proper_nouns.add(word)
+        
         # 從標籤提取
         for tag in tags:
             tag_lower = tag.lower()
@@ -305,8 +331,9 @@ URL: {url}
     def _fallback_short_name(
         self, 
         title: Optional[str], 
-        domain: str, 
-        category: str,
+        summary: str = '',
+        domain: str = '', 
+        category: str = '',
         proper_nouns: Optional[List[str]] = None
     ) -> str:
         """後備方案：從標題或域名生成簡短名稱，優先保留專有名詞"""
@@ -314,6 +341,21 @@ URL: {url}
         if proper_nouns:
             # 使用第一個專有名詞 + 分類
             return f"{proper_nouns[0]}{category[:2]}" if category else proper_nouns[0][:8]
+        
+        # 優先使用 AI 總結（如果有的話）
+        if summary:
+            # 從總結中提取關鍵詞
+            clean_summary = summary.replace('【', '').replace('】', '').replace('《', '').replace('》', '')
+            clean_summary = clean_summary.replace('「', '').replace('」', '').replace('(', '').replace(')', '')
+            
+            # 嘗試提取專有名詞（大寫開頭的詞）
+            proper_noun_matches = re.findall(r'\b[A-Z][a-z]+\b', clean_summary)
+            if proper_noun_matches:
+                return proper_noun_matches[0][:8]
+            
+            # 取總結的前幾個字
+            if len(clean_summary) >= 2:
+                return clean_summary[:6]
         
         if title:
             # 移除常見的無意義詞
