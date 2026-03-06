@@ -5,6 +5,7 @@ from app.services.database import DatabaseService
 from app.services.ai_classifier import AIClassifier
 from openai import OpenAI
 from app.config import settings
+from datetime import datetime, timedelta
 import json
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -77,8 +78,21 @@ async def chat(request: ChatRequest):
             # 統計類問題，返回所有連結用於統計
             links = all_links[:20]
         elif extracted_keywords.lower() == "recent":
-            # 最近的問題，獲取最近的連結
-            links = all_links[:20]
+            # 最近的問題，獲取本周的連結
+            today = datetime.now()
+            week_start = today - timedelta(days=today.weekday())
+            week_start_str = week_start.isoformat()
+            
+            # 過濾出本周的連結
+            week_links = []
+            for link in all_links:
+                created_at = link.get('created_at', '')
+                if created_at and created_at >= week_start_str:
+                    week_links.append(link)
+            
+            # 按時間排序（最新的在前）
+            week_links.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            links = week_links[:20]
         else:
             # 正常搜索
             keywords = [k.strip() for k in extracted_keywords.split(',') if k.strip()]
@@ -112,8 +126,9 @@ async def chat(request: ChatRequest):
         
         links_context = ""
         if links:
-            links_context = "\n找到的相關連結：\n"
-            for i, link in enumerate(links[:10], 1):  # 顯示前10個
+            # 只顯示實際找到的連結數量（不限制為10個，讓AI知道實際數量）
+            links_context = f"\n找到的相關連結（共 {len(links)} 個）：\n"
+            for i, link in enumerate(links, 1):  # 顯示所有找到的連結
                 links_context += f"{i}. 【{link.get('ai_category', '未知')}】{link.get('title', link.get('url', ''))}\n"
                 if link.get('summary'):
                     links_context += f"   摘要：{link.get('summary')}\n"
@@ -192,7 +207,7 @@ async def chat(request: ChatRequest):
         
         ai_response = response.choices[0].message.content
         
-        # 8. 返回結果
+        # 8. 返回結果（返回所有找到的連結，不限制為10個）
         return ChatResponse(
             response=ai_response,
             links=[{
@@ -209,7 +224,7 @@ async def chat(request: ChatRequest):
                 "short_name": link.get("short_name"),
                 "reviewed": link.get("reviewed", False),
                 "created_at": link.get("created_at")
-            } for link in links[:10]]  # 返回前10個連結
+            } for link in links]  # 返回所有找到的連結
         )
         
     except Exception as e:
