@@ -15,7 +15,7 @@ export default function AddLinkPage() {
     
     if (!url.trim()) {
       setError('請輸入連結')
-      return
+      return，，
     }
 
     setLoading(true)
