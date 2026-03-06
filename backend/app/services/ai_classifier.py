@@ -154,15 +154,52 @@ URL: {url}
         生成簡短易識別的名稱（4-10個字）
         優先保留專有名詞（品牌名、產品名等），例如："Nuphy鍵盤"、"Python教學"
         使用 AI 總結來生成更準確的名稱
+        常見平台使用簡稱：Facebook → fb, YouTube → yt 等
         """
         if tags is None:
             tags = []
         try:
+            # 常見平台簡稱映射
+            platform_shortcuts = {
+                'facebook': 'fb',
+                'youtube': 'yt',
+                'instagram': 'ig',
+                'twitter': 'x',
+                'linkedin': 'li',
+                'pinterest': 'pin',
+                'tiktok': 'tt',
+                'whatsapp': 'wa',
+                'telegram': 'tg',
+                'discord': 'dc',
+                'reddit': 'rd',
+                'github': 'gh',
+                'gitlab': 'gl',
+                'notion': 'nt',
+                'figma': 'fg',
+                'slack': 'sl',
+                'zoom': 'zm',
+                'spotify': 'sp',
+                'netflix': 'nf',
+                'amazon': 'az',
+                'shopee': 'sh',
+                'momo': 'mo',
+                'pchome': 'pc'
+            }
+            
             # 先提取專有名詞（品牌名、產品名等）
             proper_nouns = self._extract_proper_nouns(title, description, domain, tags, summary)
             
+            # 將專有名詞轉換為簡稱（如果有的話）
+            proper_nouns_shortened = []
+            for noun in proper_nouns:
+                noun_lower = noun.lower()
+                if noun_lower in platform_shortcuts:
+                    proper_nouns_shortened.append(platform_shortcuts[noun_lower])
+                else:
+                    proper_nouns_shortened.append(noun)
+            
             # 如果有專有名詞，優先使用專有名詞 + 類型描述
-            if proper_nouns:
+            if proper_nouns_shortened:
                 # 使用 LLM 生成包含專有名詞的簡短名稱
                 content = f"""
 請為以下連結生成一個簡短易識別的名稱（4-10個字），必須包含專有名詞：
@@ -174,23 +211,40 @@ AI 總結: {summary or '無'}
 域名: {domain}
 分類: {category}
 標籤: {', '.join(tags) if tags else '無'}
-專有名詞（必須保留）: {', '.join(proper_nouns)}
+專有名詞（必須保留，優先使用簡稱）: {', '.join(proper_nouns_shortened)}
 
 要求：
 1. 名稱要簡短（4-10個字）
-2. **必須包含專有名詞**（品牌名、產品名、網站名等），例如：Nuphy、Python、YouTube、Apple
-3. 格式：專有名詞 + 類型描述（例如："Nuphy鍵盤"、"Python教學"、"YouTube影片"）
-4. 如果有多個專有名詞，選擇最重要的1-2個
-5. 要能一眼看出這是什麼內容和品牌/產品
-6. 只返回名稱，不要其他文字
+2. **必須包含專有名詞**（品牌名、產品名、網站名等）
+3. **常見平台請使用簡稱**：
+   - Facebook → fb
+   - YouTube → yt
+   - Instagram → ig
+   - Twitter → x
+   - LinkedIn → li
+   - GitHub → gh
+   - Notion → nt
+   - Figma → fg
+   - Spotify → sp
+   - Netflix → nf
+   - Amazon → az
+   - Shopee → sh
+   - Momo → mo
+   - PChome → pc
+4. 格式：專有名詞（簡稱）+ 類型描述（例如："fb貼文"、"yt影片"、"ig照片"、"gh專案"）
+5. 如果有多個專有名詞，選擇最重要的1-2個
+6. 要能一眼看出這是什麼內容和品牌/產品
+7. 只返回名稱，不要其他文字
+8. **重要**：如果名稱超過10個字，請在完整詞語後截斷，不要在字中間截斷
 
 範例：
+- "Facebook 貼文分享" → "fb貼文"
+- "YouTube 美食料理頻道" → "yt美食"
+- "Instagram 照片分享" → "ig照片"
+- "GitHub 開源專案" → "gh專案"
 - "Nuphy Halo75 機械鍵盤開箱" → "Nuphy鍵盤"
 - "Python 程式設計教學網站" → "Python教學"
-- "YouTube 美食料理頻道" → "YouTube美食"
 - "Apple iPhone 15 評測" → "iPhone評測"
-- "Notion 使用教學" → "Notion教學"
-- "溫馨的愛情小說推薦"（無專有名詞）→ "暖心小說"
 """
             else:
                 # 沒有專有名詞時，使用一般描述
@@ -229,16 +283,59 @@ AI 總結: {summary or '無'}
             short_name = response.choices[0].message.content.strip()
             # 移除可能的引號或標點
             short_name = short_name.strip('"\'「」『』【】')
-            # 限制長度（如果有專有名詞，允許更長）
-            max_length = 10 if proper_nouns else 8
-            if len(short_name) > max_length:
-                short_name = short_name[:max_length]
             
-            return short_name if len(short_name) >= 2 else self._fallback_short_name(title, summary, domain, category, proper_nouns)
+            # 限制長度（如果有專有名詞，允許更長）
+            max_length = 10 if proper_nouns_shortened else 8
+            
+            # 智能截斷：不要在字中間截斷
+            if len(short_name) > max_length:
+                truncated = short_name[:max_length]
+                # 檢查最後一個字符
+                if max_length < len(short_name):
+                    last_char = short_name[max_length - 1]
+                    # 如果是中文字（完整字），直接截斷
+                    if ord(last_char) >= 0x4e00 and ord(last_char) <= 0x9fff:
+                        short_name = truncated
+                    # 如果是標點或空格，截斷到這裡並移除末尾標點
+                    elif last_char in ['，', '。', '、', '：', '；', ' ', '-', '_', '·', '·']:
+                        short_name = truncated.rstrip('，。、：； -_·')
+                    else:
+                        # 英文或其他字符，嘗試往前找合適的截斷點
+                        found_break = False
+                        for i in range(max_length - 1, max(0, max_length - 5), -1):
+                            char = short_name[i]
+                            # 找到空格、標點或中文字邊界
+                            if char in [' ', '-', '_', '·', '，', '。', '、', '：', '；']:
+                                short_name = short_name[:i].rstrip(' ，。、：；-_·')
+                                found_break = True
+                                break
+                            # 如果是中文字，可以在這裡截斷
+                            elif ord(char) >= 0x4e00 and ord(char) <= 0x9fff:
+                                short_name = short_name[:i + 1]
+                                found_break = True
+                                break
+                        
+                        if not found_break:
+                            # 找不到合適的截斷點，直接截斷
+                            short_name = truncated
+            
+            return short_name if len(short_name) >= 2 else self._fallback_short_name(title, summary, domain, category, proper_nouns_shortened)
             
         except Exception as e:
             print(f"Short name generation error: {e}")
-            return self._fallback_short_name(title, summary, domain, category, proper_nouns)
+            # 轉換專有名詞為簡稱（如果還沒轉換）
+            if 'proper_nouns_shortened' not in locals():
+                proper_nouns_shortened = []
+                if 'proper_nouns' in locals():
+                    for noun in proper_nouns:
+                        noun_lower = noun.lower()
+                        if noun_lower in platform_shortcuts:
+                            proper_nouns_shortened.append(platform_shortcuts[noun_lower])
+                        else:
+                            proper_nouns_shortened.append(noun)
+                else:
+                    proper_nouns_shortened = []
+            return self._fallback_short_name(title, summary, domain, category, proper_nouns_shortened)
     
     def _extract_proper_nouns(
         self, 
@@ -336,11 +433,15 @@ AI 總結: {summary or '無'}
         category: str = '',
         proper_nouns: Optional[List[str]] = None
     ) -> str:
-        """後備方案：從標題或域名生成簡短名稱，優先保留專有名詞"""
-        # 如果有專有名詞，優先使用
+        """後備方案：從標題或域名生成簡短名稱，優先保留專有名詞（已使用簡稱）"""
+        # 如果有專有名詞（已經是簡稱），優先使用
         if proper_nouns:
-            # 使用第一個專有名詞 + 分類
-            return f"{proper_nouns[0]}{category[:2]}" if category else proper_nouns[0][:8]
+            # 使用第一個專有名詞 + 分類（如果長度合適）
+            if category:
+                combined = f"{proper_nouns[0]}{category[:2]}"
+                if len(combined) <= 8:
+                    return combined
+            return proper_nouns[0][:8]
         
         # 優先使用 AI 總結（如果有的話）
         if summary:
@@ -353,8 +454,13 @@ AI 總結: {summary or '無'}
             if proper_noun_matches:
                 return proper_noun_matches[0][:8]
             
-            # 取總結的前幾個字
+            # 智能截斷：在完整詞語後截斷
             if len(clean_summary) >= 2:
+                # 嘗試在合適的位置截斷（標點、空格）
+                for i in range(min(6, len(clean_summary)), 0, -1):
+                    if clean_summary[i-1] in ['，', '。', '、', '：', '；', ' ', '-', '_']:
+                        return clean_summary[:i-1]
+                # 如果找不到合適的截斷點，直接取前6個字（中文字通常是完整的）
                 return clean_summary[:6]
         
         if title:
@@ -367,8 +473,13 @@ AI 總結: {summary or '無'}
             if proper_noun_matches:
                 return proper_noun_matches[0][:8]
             
-            # 取前6個字
+            # 智能截斷：在完整詞語後截斷
             if len(clean_title) >= 2:
+                # 嘗試在合適的位置截斷（標點、空格）
+                for i in range(min(6, len(clean_title)), 0, -1):
+                    if clean_title[i-1] in ['，', '。', '、', '：', '；', ' ', '-', '_']:
+                        return clean_title[:i-1]
+                # 如果找不到合適的截斷點，直接取前6個字
                 return clean_title[:6]
         
         # 使用域名
