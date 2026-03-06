@@ -159,10 +159,11 @@ URL: {url}
         if tags is None:
             tags = []
         try:
-            # 常見平台簡稱映射
+            # 常見平台簡稱映射（大小寫不敏感）
             platform_shortcuts = {
                 'facebook': 'fb',
                 'youtube': 'yt',
+                'youtu.be': 'yt',  # YouTube 短鏈接
                 'instagram': 'ig',
                 'twitter': 'x',
                 'linkedin': 'li',
@@ -193,9 +194,14 @@ URL: {url}
             proper_nouns_shortened = []
             for noun in proper_nouns:
                 noun_lower = noun.lower()
-                if noun_lower in platform_shortcuts:
-                    proper_nouns_shortened.append(platform_shortcuts[noun_lower])
-                else:
+                # 檢查是否匹配平台簡稱（支持部分匹配，如 "youtube" 匹配 "youtube"）
+                matched = False
+                for platform, shortcut in platform_shortcuts.items():
+                    if platform in noun_lower or noun_lower in platform:
+                        proper_nouns_shortened.append(shortcut)
+                        matched = True
+                        break
+                if not matched:
                     proper_nouns_shortened.append(noun)
             
             # 如果有專有名詞，優先使用專有名詞 + 類型描述
@@ -231,20 +237,32 @@ AI 總結: {summary or '無'}
    - Shopee → sh
    - Momo → mo
    - PChome → pc
-4. 格式：專有名詞（簡稱）+ 類型描述（例如："fb貼文"、"yt影片"、"ig照片"、"gh專案"）
+4. **格式：專有名詞（簡稱）+ 具體類型描述**
+   - 必須具體！不要只用"小說"、"故事"、"網站"這樣模糊的詞
+   - 要能看出是什麼類型的小說/故事/網站/內容
+   - 例如：
+     * "暖心愛情小說" 而不是 "小說"
+     * "Python教學網站" 而不是 "網站"
+     * "fb貼文" 而不是 "fb內容"
+     * "yt美食影片" 而不是 "yt影片"
+     * "ig照片分享" 而不是 "ig內容"
 5. 如果有多個專有名詞，選擇最重要的1-2個
-6. 要能一眼看出這是什麼內容和品牌/產品
+6. 要能一眼看出這是什麼**具體**內容和品牌/產品
 7. 只返回名稱，不要其他文字
 8. **重要**：如果名稱超過10個字，請在完整詞語後截斷，不要在字中間截斷
 
 範例：
 - "Facebook 貼文分享" → "fb貼文"
-- "YouTube 美食料理頻道" → "yt美食"
+- "YouTube 美食料理頻道" → "yt美食"（不是"yt影片"）
+- "YouTube 程式設計教學" → "yt教學"（不是"yt影片"）
 - "Instagram 照片分享" → "ig照片"
 - "GitHub 開源專案" → "gh專案"
-- "Nuphy Halo75 機械鍵盤開箱" → "Nuphy鍵盤"
+- "溫馨的愛情小說推薦" → "暖心愛情小說"（不是"小說"）
+- "懸疑推理小說" → "懸疑小說"（不是"小說"）
 - "Python 程式設計教學網站" → "Python教學"
 - "Apple iPhone 15 評測" → "iPhone評測"
+- "健身運動教學" → "健身教學"（不是"教學"）
+- "美食料理網站" → "美食網站"（不是"網站"）
 """
             else:
                 # 沒有專有名詞時，使用一般描述
@@ -260,20 +278,29 @@ AI 總結: {summary or '無'}
 
 要求：
 1. 名稱要簡短（4-8個字）
-2. 要能一眼看出內容類型（例如：溫馨故事、小說、學習網站、教學影片等）
+2. **必須具體！**要能一眼看出是什麼類型的小說/故事/網站/內容
+   - 不要只用"小說"、"故事"、"網站"這樣模糊的詞
+   - 要包含具體的描述，例如：
+     * "暖心愛情小說" 而不是 "小說"
+     * "懸疑推理故事" 而不是 "故事"
+     * "Python教學網站" 而不是 "網站"
+     * "美食料理影片" 而不是 "影片"
 3. 不要使用分類名稱（如"學習"、"娛樂"），要用更具體的描述
 4. 只返回名稱，不要其他文字
 
 範例：
-- "溫馨的愛情小說推薦" → "暖心小說"
-- "健身運動教學網站" → "健身教學"
-- "美食料理食譜分享" → "美食食譜"
+- "溫馨的愛情小說推薦" → "暖心愛情小說"（不是"小說"）
+- "懸疑推理小說" → "懸疑小說"（不是"小說"）
+- "健身運動教學網站" → "健身教學"（不是"教學"）
+- "美食料理食譜分享" → "美食食譜"（不是"食譜"）
+- "Python 程式設計教學" → "Python教學"
+- "JavaScript 前端開發" → "JS前端"
 """
             
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "你是一個專業的內容命名助手。請根據連結內容生成簡短易識別的名稱，優先保留專有名詞（品牌名、產品名、網站名等）。"},
+                    {"role": "system", "content": "你是一個專業的內容命名助手。請根據連結內容生成簡短易識別的名稱，優先保留專有名詞（品牌名、產品名、網站名等）。**重要**：1) 名稱必須具體，要能看出是什麼類型的小說/故事/網站/內容，不要只用模糊的詞如"小說"、"故事"、"網站"、"影片"。2) 常見平台請使用簡稱：Facebook→fb, YouTube→yt, Instagram→ig, Twitter→x, GitHub→gh等。3) 格式：專有名詞（簡稱）+ 具體類型描述。"},
                     {"role": "user", "content": content}
                 ],
                 temperature=0.5,
@@ -420,8 +447,13 @@ AI 總結: {summary or '無'}
         if domain_clean and len(domain_clean) >= 2:
             # 如果域名看起來像品牌名（不是通用詞）
             generic_domains = {'com', 'org', 'net', 'edu', 'gov', 'blog', 'site', 'app', 'io'}
-            if domain_clean.lower() not in generic_domains:
-                proper_nouns.add(domain_clean.capitalize())
+            domain_lower = domain_clean.lower()
+            if domain_lower not in generic_domains:
+                # 特殊處理：youtube.com 或 youtu.be 都應該提取為 "youtube"
+                if 'youtube' in domain_lower or 'youtu' in domain_lower:
+                    proper_nouns.add('youtube')
+                else:
+                    proper_nouns.add(domain_clean.capitalize())
         
         return list(proper_nouns)[:3]  # 最多返回3個專有名詞
     
@@ -433,11 +465,35 @@ AI 總結: {summary or '無'}
         category: str = '',
         proper_nouns: Optional[List[str]] = None
     ) -> str:
-        """後備方案：從標題或域名生成簡短名稱，優先保留專有名詞（已使用簡稱）"""
-        # 如果有專有名詞（已經是簡稱），優先使用
+        """後備方案：從標題或域名生成簡短名稱，優先保留專有名詞（已使用簡稱），必須具體"""
+        # 如果有專有名詞（已經是簡稱），優先使用 + 具體描述
         if proper_nouns:
-            # 使用第一個專有名詞 + 分類（如果長度合適）
-            if category:
+            # 嘗試從 summary 或 title 提取具體類型描述
+            source_text = (summary or title or '').lower()
+            
+            # 提取具體類型關鍵詞（避免模糊詞）
+            specific_keywords = []
+            # 小說類型
+            if any(kw in source_text for kw in ['愛情', '懸疑', '推理', '科幻', '奇幻', '武俠', '歷史', '溫馨', '暖心']):
+                for kw in ['愛情', '懸疑', '推理', '科幻', '奇幻', '武俠', '歷史', '溫馨', '暖心']:
+                    if kw in source_text:
+                        specific_keywords.append(kw)
+                        break
+            # 網站/內容類型
+            elif any(kw in source_text for kw in ['教學', '學習', '程式', '設計', '美食', '健身', '旅遊', '投資', '理財']):
+                for kw in ['教學', '學習', '程式', '設計', '美食', '健身', '旅遊', '投資', '理財']:
+                    if kw in source_text:
+                        specific_keywords.append(kw)
+                        break
+            
+            # 如果有具體關鍵詞，組合使用
+            if specific_keywords:
+                combined = f"{proper_nouns[0]}{specific_keywords[0]}"
+                if len(combined) <= 8:
+                    return combined
+            
+            # 否則使用專有名詞 + 分類（如果長度合適且不是模糊分類）
+            if category and category not in ['其他', '娛樂', '學習', '工作']:  # 避免模糊分類
                 combined = f"{proper_nouns[0]}{category[:2]}"
                 if len(combined) <= 8:
                     return combined
@@ -452,6 +508,17 @@ AI 總結: {summary or '無'}
             # 嘗試提取專有名詞（大寫開頭的詞）
             proper_noun_matches = re.findall(r'\b[A-Z][a-z]+\b', clean_summary)
             if proper_noun_matches:
+                # 嘗試加上具體類型描述
+                specific_keywords = []
+                if any(kw in clean_summary for kw in ['愛情', '懸疑', '推理', '科幻', '教學', '程式', '美食']):
+                    for kw in ['愛情', '懸疑', '推理', '科幻', '教學', '程式', '美食']:
+                        if kw in clean_summary:
+                            specific_keywords.append(kw)
+                            break
+                if specific_keywords:
+                    combined = f"{proper_noun_matches[0]}{specific_keywords[0]}"
+                    if len(combined) <= 8:
+                        return combined
                 return proper_noun_matches[0][:8]
             
             # 智能截斷：在完整詞語後截斷
